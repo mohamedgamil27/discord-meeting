@@ -133,14 +133,30 @@ def main() -> None:
     segment_generator, info = model.transcribe(
         str(audio_file),
         task="transcribe",
+        language=None,
+        multilingual=True,
         beam_size=5,
         vad_filter=True,
         vad_parameters={
-            "min_silence_duration_ms": 500,
+            "min_silence_duration_ms": 350,
+            "speech_pad_ms": 300,
         },
-        condition_on_previous_text=True,
-        word_timestamps=False,
+        condition_on_previous_text=False,
+        word_timestamps=True,
         temperature=0.0,
+        initial_prompt=(
+            "هذا تسجيل اجتماع يحتوي على العربية المصرية والإنجليزية. "
+            "اكتب الكلام العربي بالعربية، واكتب الكلام الإنجليزي بالإنجليزية. "
+            "لا تترجم بين اللغتين. "
+            "This meeting contains Egyptian Arabic and English. "
+            "Transcribe Arabic speech in Arabic and English speech in English. "
+            "Do not translate either language."
+        ),
+        hotwords=(
+            "project server database deployment documentation "
+            "deadline meeting action items Mohamed Ahmed "
+            "المشروع السيرفر قاعدة البيانات الاجتماع الموعد"
+        ),
     )
 
     segments = list(segment_generator)
