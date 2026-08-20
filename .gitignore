@@ -1,0 +1,11 @@
+.venv/
+.env
+.python-version
+.vscode/
+*.backup
+__pycache__/
+*.py[cod]
+logs/
+storage/recordings/
+storage/transcripts/
+storage/meetings/
