@@ -17,6 +17,7 @@ from models.meeting import (
     RecordingSessionManager,
 )
 from services.audio_recorder import PerUserWaveSink
+from services.transcriber import MeetingTranscriber
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -631,12 +632,46 @@ class RecordCommands(app_commands.Group):
                 )
             )
 
+            destination_channel = interaction.channel
+
+            if destination_channel is None or not hasattr(
+                destination_channel,
+                "send",
+            ):
+                logger.warning(
+                    "Cannot schedule transcript upload because the destination channel is not sendable | guild=%s | directory=%s",
+                    guild_id,
+                    session.directory,
+                )
+                await interaction.followup.send(
+                    "⚠️ تم حفظ التسجيل، لكن القناة المستخدمة لإرسال النتيجة غير صالحة، لذلك تم إيقاف إرسال النتيجة في الخلفية.",
+                    ephemeral=True,
+                )
+                return
+
+            task = asyncio.create_task(
+                bot._handle_background_transcription(
+                    session,
+                    destination_channel,
+                )
+            )
+            bot.background_tasks.add(task)
+            task.add_done_callback(bot.background_tasks.discard)
+
+            logger.info(
+                "Recording stop finalized and transcription queued | guild=%s | directory=%s | channel=%s",
+                guild_id,
+                session.directory,
+                destination_channel,
+            )
+
             await interaction.followup.send(
-                "⏹️ **تم إيقاف التسجيل**\n\n"
-                f"⏱️ المدة: "
-                f"**{minutes}m {seconds}s**\n"
-                f"👥 عدد المتحدثين: "
-                f"**{session.speaker_count}**\n"
+                "⏹️ **تم حفظ التسجيل**\n\n"
+                "🧾 تم حفظ ملفات WAV ومعلومات الجلسة بنجاح.\n"
+                "🎙️ النسخ التلقائي بدأ في الخلفية.\n"
+                "📤 سيتم نشر النص النهائي في نفس القناة عند الانتهاء.\n\n"
+                f"⏱️ المدة: **{minutes}m {seconds}s**\n"
+                f"👥 عدد المتحدثين: **{session.speaker_count}**\n"
                 f"{summary_text}\n\n"
                 f"{validation_text}\n"
                 "📁 المسار:\n"
@@ -742,6 +777,10 @@ class MeetingBot(commands.Bot):
         self.session_manager = (
             RecordingSessionManager()
         )
+        self.transcriber = MeetingTranscriber()
+        self.background_tasks: set[
+            asyncio.Task[object]
+        ] = set()
 
         self._session_locks: dict[
             int,
@@ -756,6 +795,86 @@ class MeetingBot(commands.Bot):
             guild_id,
             asyncio.Lock(),
         )
+
+    async def _handle_background_transcription(
+        self,
+        session: RecordingSession,
+        destination_channel: discord.abc.Messageable | None,
+    ) -> None:
+        try:
+            result = await self.transcriber.transcribe_meeting(
+                session,
+            )
+
+            if destination_channel is None or not hasattr(
+                destination_channel,
+                "send",
+            ):
+                logger.warning(
+                    "Skipping transcript upload because the destination channel is not sendable | guild=%s | directory=%s",
+                    session.guild_id,
+                    session.directory,
+                )
+                return
+
+            model_name = "large-v3"
+            meeting_duration = session.meeting_duration
+            message = (
+                "✅ تم إنهاء النسخ الفوري للقاء\n\n"
+                f"⏱️ المدة: **{meeting_duration:.2f} ثانية**\n"
+                f"👥 عدد المشاركين: **{session.speaker_count}**\n"
+                f"✅ ناجح: **{result.success_count}**\n"
+                f"⚠️ فشل: **{result.failure_count}**\n"
+                f"⏳ وقت المعالجة: **{result.total_transcription_duration:.2f} ثانية**\n"
+                f"🤖 النموذج: **{model_name}**"
+            )
+
+            transcript_path = result.meeting_transcript_path
+            if transcript_path is None or not transcript_path.exists():
+                await destination_channel.send(message)
+                return
+
+            try:
+                await destination_channel.send(
+                    content=message,
+                    file=discord.File(
+                        transcript_path,
+                        filename=transcript_path.name,
+                    ),
+                )
+                logger.info(
+                    "Discord transcript uploaded | guild=%s | channel=%s | file=%s",
+                    session.guild_id,
+                    destination_channel,
+                    transcript_path,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to upload transcript file to Discord | guild=%s | path=%s",
+                    session.guild_id,
+                    transcript_path,
+                )
+                await destination_channel.send(
+                    "⚠️ تم إنشاء ملف النص النهائي محليًا، لكن فشل تحميله إلى الدردشة.\n"
+                    f"المسار المحلي: `{transcript_path}`",
+                )
+
+        except Exception:
+            logger.exception(
+                "Background transcription failure | guild=%s | directory=%s",
+                session.guild_id,
+                session.directory,
+            )
+
+            if destination_channel is not None and hasattr(
+                destination_channel,
+                "send",
+            ):
+                await destination_channel.send(
+                    "❌ فشل النسخ التلقائي في الخلفية.\n"
+                    f"المجلد: `{session.directory}`\n"
+                    "تم الاحتفاظ بكل ملفات WAV وكل نصوص المشاركين محليًا.",
+                )
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=GUILD_ID)
