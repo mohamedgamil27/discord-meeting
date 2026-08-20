@@ -1,2 +1,6 @@
 discord.py[voice]==2.7.1
 python-dotenv>=1.0,<2.0
+
+faster-whisper==1.2.1
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
