@@ -2,10 +2,14 @@
 .env
 .python-version
 .vscode/
-*.backup
 __pycache__/
 *.py[cod]
+*.backup
+
+# Runtime diagnostics/logs (never commit)
+diagnostics/
 logs/
-storage/recordings/
-storage/transcripts/
-storage/meetings/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
