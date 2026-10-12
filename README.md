@@ -1,171 +1,160 @@
-# Discord Meeting Bot
+# EGX30 Data Pipeline
 
-A Discord voice meeting recorder with per-user WAV capture and automatic background transcription for Arabic and English meetings.
+Automated EGX30 daily market-data collection pipeline using Python, Playwright (headless Chromium), and GitHub Actions.
 
-## Features
+## Why this replaces the old browser extension
 
-- Records each speaker into a separate WAV file.
-- Stores meeting metadata in JSON.
-- Transcribes recordings automatically after `/record stop`.
-- Uses `faster-whisper` with the `large-v3` model, CUDA, and `float16`.
-- Produces one transcript per participant and a combined meeting transcript.
-- Supports Arabic and English speech without translation or transliteration.
-- Keeps transcription in a background task so the bot can continue handling Discord events.
-- Writes bot logs to `logs/bot.log`.
+This project removes all extension/native-host/local-machine dependencies and runs as a standalone scheduled pipeline in GitHub Actions. No Brave, no browser extension, and no manual browser opening are required.
 
-## Requirements
+## Architecture
 
-- Linux
-- Python 3.13 or a compatible Python version
-- A Discord bot application with voice permissions
-- An NVIDIA GPU with working CUDA support for the default transcription configuration
-- CUDA libraries available through the Python virtual environment
+GitHub Actions schedule/manual trigger
+→ `src/collect_egx30.py`
+→ Headless Chromium via Playwright
+→ EGX Arabic indices page extraction and validation
+→ Daily + 5-minute + derived features export (CSV/JSON)
+→ Data-only commit under `data/`
 
-CPU transcription is not configured in the current production bot. The standalone script can be adapted for another device or compute type if needed.
+## Repository structure
 
-## Discord Bot Setup
+```text
+.github/workflows/daily-egx30.yml
+src/collect_egx30.py
+data/.gitkeep
+tests/test_collector.py
+requirements.txt
+.gitignore
+README.md
+```
 
-1. Create an application and bot at the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Enable the required bot permissions:
-   - View Channels
-   - Connect
-   - Speak
-   - Send Messages
-   - Use Slash Commands
-3. Invite the bot to your server with the `bot` and `applications.commands` scopes.
-4. Make sure users are informed before recording starts.
+## Python requirements
 
-## Installation
+- Python 3.12
+- Dependencies from `requirements.txt`
+
+## Local setup
 
 ```bash
-git clone https://github.com/mohamedgamil27/discord-meeting.git
-cd discord-meeting
-
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m playwright install --with-deps chromium
 ```
 
-Create a `.env` file in the project root:
-
-```env
-DISCORD_TOKEN=your_discord_bot_token
-TEST_GUILD_ID=your_discord_server_id
-```
-
-Never commit `.env` or expose the bot token. `TEST_GUILD_ID` is the numeric Discord server ID where commands are registered.
-
-## Run the Bot
-
-Use the CUDA wrapper so `faster-whisper` can find the CUDA libraries installed in the virtual environment:
+## Run collector locally
 
 ```bash
-./scripts/run_with_cuda.sh python bot.py
+python src/collect_egx30.py
 ```
 
-The bot registers these commands:
+Optional headed-browser run:
 
-| Command | Description |
-| --- | --- |
-| `/ping` | Check that the bot is online. |
-| `/record start` | Start recording the current voice channel. |
-| `/record status` | Show the current recording status. |
-| `/record stop` | Stop recording and start background transcription. |
-| `/record cancel` | Stop recording and delete the current meeting directory. |
+```bash
+python src/collect_egx30.py --headed
+```
 
-After `/record stop`, the bot finalizes the WAV files and starts transcription in the background. The resulting transcript files are saved in the meeting recording directory.
+## Run tests
 
-## Storage Layout
+```bash
+pytest -q
+```
+
+## Workflow usage
+
+- Manual run:
+  - Repository
+  - → Actions
+  - → Daily EGX30 collection
+  - → Run workflow
+- Automatic schedule: Sunday–Thursday at `15:00 UTC` (safely after market close in Cairo across standard/DST).
+
+## Required repository setting
+
+Repository
+→ Settings
+→ Actions
+→ General
+→ Workflow permissions
+→ Read and write permissions
+
+## Output structure and files
+
+Each session writes under:
 
 ```text
-storage/
-  recordings/
-    <guild_id>/
-      <meeting_timestamp>_<initiator_id>/
-        session.json
-        <user_id>.wav
-        <user_id>.transcript.txt
-        meeting.transcript.txt
-logs/
-  bot.log
+data/YYYY/MM/DD/
 ```
 
-`session.json` contains meeting metadata, speaker names, audio validation results, and transcription status.
+Exactly six files are generated:
 
-## Standalone Transcription Test
+- `egx30_daily_YYYY-MM-DD.csv`
+- `egx30_daily_YYYY-MM-DD.json`
+- `egx30_5minute_YYYY-MM-DD.csv`
+- `egx30_5minute_YYYY-MM-DD.json`
+- `egx30_features_YYYY-MM-DD.csv`
+- `egx30_features_YYYY-MM-DD.json`
 
-To transcribe one WAV file manually:
+Encoding:
 
-```bash
-source .venv/bin/activate
-./scripts/run_with_cuda.sh python scripts/test_transcribe.py path/to/recording.wav
-```
+- CSV: UTF-8 with BOM
+- JSON: UTF-8, indented
+- Arabic text preserved (`ensure_ascii=False`)
 
-Options:
+## Output schemas
 
-```bash
-./scripts/run_with_cuda.sh python scripts/test_transcribe.py \
-  path/to/recording.wav \
-  --model medium \
-  --compute-type float16 \
-  --output path/to/output.transcript.txt
-```
+### Daily fields
 
-The bot's background service uses `large-v3` by default. The standalone script defaults to `medium` so it is easier to use for quick tests.
+`Date, Open, High, Low, Close, ChangePercent, YTDPercent, IndexValueUSD, ChangePercentUSD, TotalTradedValueEGP, TotalTradedValueMarketPercent, TotalVolume, TotalVolumeMarketPercent, TradesCount, TradesMarketPercent, MarketCapEGP, MarketCapMarketPercent, Source, CollectedAt`
 
-## Validation
+### Five-minute fields
 
-Check Python syntax and imports:
+`Timestamp, RawChartTime, NormalizedTime24h, Value, IntervalMinutes, Source, CollectedAt`
 
-```bash
-source .venv/bin/activate
-python -m compileall bot.py models services scripts
-python -c "import discord, faster_whisper, ctranslate2; import services.transcriber; print('IMPORT_OK')"
-```
+### Features fields
 
-Check that CTranslate2 can detect the GPU:
+`Timestamp, RawChartTime, NormalizedTime24h, Value, PreviousValue, PointChange, Return5mPercent, Direction, SessionOpen, ChangeFromOpen, ChangeFromOpenPercent, RunningHigh, RunningLow, DistanceFromRunningHigh, DistanceFromRunningLow, PositionInObservedRangePercent, MovingAverage3, MovingAverage6, RollingStd3, RollingStd6, MinutesFromOpen, Hour, Minute, IntervalMinutes, Source, DataQualityStatus`
 
-```bash
-source .venv/bin/activate
-python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"
-```
+Feature files are mathematically derived from five-minute points and are not separate raw EGX source data.
 
-## Troubleshooting
+## Validation and safety
 
-### `DISCORD_TOKEN is not set in .env`
+Collector rejects output when required values are missing/invalid, chart points are empty, date parsing fails, selected index is not EGX30, or OHLC checks fail.
 
-Create `.env` in the project root and add both required variables. Confirm the file is named exactly `.env`.
+No output files are written until full validation passes.
 
-### CUDA libraries cannot be found
+## Automatic commit behavior
 
-Run the bot through `scripts/run_with_cuda.sh`. If the error continues, reinstall the CUDA packages inside `.venv`:
+Workflow stages only `data/`, commits only when data changed, rebases before push, and uses GitHub Actions bot identity.
 
-```bash
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
+Commit message format:
 
-### The bot cannot record voice
+`data: add EGX30 session YYYY-MM-DD`
 
-Confirm that the bot can View Channels, Connect, Speak, and Use Slash Commands. Also confirm that the bot is not server-deafened and that the user issuing `/record start` is connected to a voice channel.
+## Diagnostics and failure artifacts
 
-### Transcription is still running
+On failed collection attempts, diagnostics are written under `debug/egx30/` (error text + screenshot + page HTML when available). Workflow uploads these artifacts for 7 days only when the job fails.
 
-The `large-v3` model can take time to load and process audio. Check `logs/bot.log` and the meeting directory for transcript output and updated metadata.
+## Common failure causes
 
-## Project Structure
+- EGX page layout/selectors changed
+- EGX website temporary outage or anti-bot behavior
+- Delayed/partial chart point loading
 
-```text
-bot.py                    Discord bot and slash-command handlers
-models/meeting.py         Recording session models and metadata
-services/audio_recorder.py Per-user WAV recording
-services/transcriber.py   Background Whisper transcription
-scripts/test_transcribe.py Standalone transcription test
-scripts/run_with_cuda.sh  CUDA library environment setup
-requirements.txt          Python dependencies
-```
+## Updating selectors if EGX changes
 
-## License
+Update extraction/label mapping in:
 
-No license has been specified for this project yet.
+- `extract_raw_capture`
+- `build_daily_summary`
+- `build_chart_points`
+
+Then run tests and trigger a manual workflow run.
+
+## External source caveat
+
+The EGX website remains the external source of truth. Changes on `https://www.egx.com.eg/ar/Indices.aspx` may break extraction and require selector/parser updates.
+
+## Chart-time conversion assumption
+
+Chart labels are treated as 12-hour values when meridiem markers are present (`AM/PM`, `ص/م`). If missing, conversion is inferred to maintain chronological order and align with EGX daytime session behavior.

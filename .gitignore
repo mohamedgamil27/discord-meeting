@@ -1,11 +1,36 @@
-.venv/
-.env
-.python-version
-.vscode/
-*.backup
+# Python
 __pycache__/
 *.py[cod]
-logs/
-storage/recordings/
-storage/transcripts/
-storage/meetings/
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+.env.*
+
+# Debug and diagnostics
+/debug/
+debug/**/*.png
+debug/**/*.html
+debug/**/*.log
+
+# Playwright and test reports
+playwright-report/
+test-results/
+
+# Temporary output
+*.tmp
+*.temp
+*.swp
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
