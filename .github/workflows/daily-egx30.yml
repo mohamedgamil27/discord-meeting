@@ -64,17 +64,7 @@ jobs:
             exit 0
           fi
 
-          SESSION_DATE=$(python - <<'PY'
-from pathlib import Path
-import json
-
-files = sorted(Path("data").glob("**/egx30_daily_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-if not files:
-    raise SystemExit("No daily JSON files found")
-payload = json.loads(files[0].read_text(encoding="utf-8"))
-print(payload.get("Date", "unknown-date"))
-PY
-)
+          SESSION_DATE=$(python -c "from pathlib import Path; import json; files=sorted(Path('data').glob('**/egx30_daily_*.json'), key=lambda p: p.stat().st_mtime, reverse=True); assert files, 'No daily JSON files found'; payload=json.loads(files[0].read_text(encoding='utf-8')); print(payload.get('Date', 'unknown-date'))")
 
           git commit -m "data: add EGX30 session ${SESSION_DATE}"
           git pull --rebase origin "${BRANCH_NAME}"

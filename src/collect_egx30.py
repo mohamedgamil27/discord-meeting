@@ -391,7 +391,7 @@ def save_outputs(
 
 def extract_raw_capture(page: Any) -> RawCapture:
     payload = page.evaluate(
-        """
+        r"""
         () => {
           const toText = (el) => (el?.textContent || '').replace(/\u00a0/g, ' ').trim();
           const selected = document.querySelector('select option:checked');
@@ -587,7 +587,7 @@ def save_diagnostics(page: Any | None, attempt_dir: Path, message: str) -> None:
 
 def _ensure_egx30_selection(page: Any) -> str:
     selection = page.evaluate(
-        """
+        r"""
         () => {
           const select = document.querySelector('select[id*=Indices], select[name*=Indices], select');
           if (!select) {
@@ -604,7 +604,7 @@ def _ensure_egx30_selection(page: Any) -> str:
         return selection
 
     page.evaluate(
-        """
+        r"""
         () => {
           const select = document.querySelector('select[id*=Indices], select[name*=Indices], select');
           if (!select) return;
@@ -619,7 +619,7 @@ def _ensure_egx30_selection(page: Any) -> str:
 
     page.wait_for_timeout(500)
     return page.evaluate(
-        """
+        r"""
         () => {
           const select = document.querySelector('select[id*=Indices], select[name*=Indices], select');
           if (!select) return '';
